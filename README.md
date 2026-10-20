@@ -1,4 +1,7 @@
 
+** this is only bridge connector with status in HA **
+no HA app integration **
+
 Integration of the Longer Ray5 laser engraver with Home Assistant through CNCjs running on a Raspberry Pi.
 This project provides real-time laser status monitoring, Home Assistant integration and visual machine-state indication using addressable WS2812 LEDs.
 Key features
