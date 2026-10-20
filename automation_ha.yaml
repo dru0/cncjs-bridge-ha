@@ -1,0 +1,95 @@
+
+alias: Ray5 - CNCjs Wentylatory i LED
+description: Sterowanie wentylacją na podstawie statusu CNCjs
+triggers:
+  - trigger: state
+    entity_id: sensor.cncjs_status
+    to: "running"
+    id: start
+
+  - trigger: state
+    entity_id: sensor.cncjs_status
+    to: "finished"
+    id: stop
+
+  - trigger: state
+    entity_id: sensor.cncjs_status
+    to:
+      - "error"
+      - "stopped"
+    id: blad
+
+  - trigger: event
+    event_type: timer.finished
+    event_data:
+      entity_id: timer.laser_wentylacja
+    id: timer_koniec
+
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: start
+        sequence:
+          - action: timer.cancel
+            target:
+              entity_id: timer.laser_wentylacja
+          - action: switch.turn_on
+            target:
+              entity_id:
+                - switch.laser_fan_socket_1
+                - switch.wall_fan_socket_1
+
+      - conditions:
+          - condition: trigger
+            id: stop
+        sequence:
+          - action: switch.turn_off
+            target:
+              entity_id: switch.laser_fan_socket_1
+          - action: timer.start
+            target:
+              entity_id: timer.laser_wentylacja
+            data:
+              duration: "00:10:00"
+          - action: notify.send_message
+            target:
+              device_id: deb52bb59834a747e48c878e71a95b4f
+            data:
+              message: >-
+                Laser Ray5 zakończył wypalanie.
+                Wentylator ścienny wyłączy się za 10 minut.
+
+      - conditions:
+          - condition: trigger
+            id: blad
+        sequence:
+          - action: timer.cancel
+            target:
+              entity_id: timer.laser_wentylacja
+          - action: switch.turn_on
+            target:
+              entity_id:
+                - switch.laser_fan_socket_1
+                - switch.wall_fan_socket_1
+          - action: notify.send_message
+            target:
+              device_id: deb52bb59834a747e48c878e71a95b4f
+            data:
+              message: >-
+                UWAGA! Laser został zatrzymany lub wystąpił błąd.
+                Sprawdź urządzenie. Wentylatory pozostają włączone.
+
+      - conditions:
+          - condition: trigger
+            id: timer_koniec
+          - condition: state
+            entity_id: sensor.cncjs_status
+            state: "finished"
+        sequence:
+          - action: switch.turn_off
+            target:
+              entity_id: switch.wall_fan_socket_1
+
+mode: queued
+max: 10

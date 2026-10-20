@@ -1,0 +1,83 @@
+# Paste into the HA automation YAML editor as ONE automation.
+# Uses sensor.cncjs_status created automatically via HA REST API.
+# Timer timer.laser_wentylacja must already exist.
+alias: Ray5 - CNCjs Wentylatory i LED
+description: CNCjs bridge -> HA, bez MQTT
+triggers:
+  - trigger: state
+    entity_id: sensor.cncjs_status
+    to: "running"
+    id: start
+  - trigger: state
+    entity_id: sensor.cncjs_status
+    to: "finished"
+    id: stop
+  - trigger: state
+    entity_id: sensor.cncjs_status
+    to: "error"
+    id: error
+  - trigger: event
+    event_type: timer.finished
+    event_data:
+      entity_id: timer.laser_wentylacja
+    id: timer_koniec
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: start
+        sequence:
+          - action: timer.cancel
+            target:
+              entity_id: timer.laser_wentylacja
+          - action: switch.turn_on
+            target:
+              entity_id:
+                - switch.laser_fan_socket_1
+                - switch.wall_fan_socket_1
+      - conditions:
+          - condition: trigger
+            id: stop
+        sequence:
+          - action: switch.turn_off
+            target:
+              entity_id: switch.laser_fan_socket_1
+          - action: timer.start
+            target:
+              entity_id: timer.laser_wentylacja
+            data:
+              duration: "00:10:00"
+          - action: notify.send_message
+            target:
+              device_id: deb52bb59834a747e48c878e71a95b4f
+            data:
+              message: Laser skończył palić (CNCjs)
+      - conditions:
+          - condition: trigger
+            id: error
+        sequence:
+          - action: timer.cancel
+            target:
+              entity_id: timer.laser_wentylacja
+          - action: switch.turn_on
+            target:
+              entity_id:
+                - switch.laser_fan_socket_1
+                - switch.wall_fan_socket_1
+          - action: notify.send_message
+            target:
+              device_id: deb52bb59834a747e48c878e71a95b4f
+            data:
+              message: "ALARM: CNCjs utracił połączenie lub zadanie przerwano. Sprawdź laser. Wentylacja pozostaje włączona."
+      - conditions:
+          - condition: trigger
+            id: timer_koniec
+          - condition: state
+            entity_id: sensor.cncjs_status
+            state: "finished"
+        sequence:
+          - action: switch.turn_off
+            target:
+              entity_id: switch.wall_fan_socket_1
+mode: queued
+max: 10
