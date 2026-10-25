@@ -1,15 +1,22 @@
 [Unit]
 Description=CNCjs Home Assistant WS2812 bridge
-After=network-online.target
 Wants=network-online.target
+After=network-online.target cncjs.service
+
 [Service]
 Type=simple
-User=pi
-SupplementaryGroups=spi
-WorkingDirectory=/home/pi/cncjs-ha-ws2812
-EnvironmentFile=/home/pi/cncjs-ha-ws2812/bridge.env
-ExecStart=/usr/bin/node /home/pi/cncjs-ha-ws2812/bridge.js
+User=cncjsbridge
+Group=cncjsbridge
+SupplementaryGroups=spi dialout
+WorkingDirectory=/opt/cncjs-bridge-ha
+EnvironmentFile=/opt/cncjs-bridge-ha/bridge.env
+ExecStart=/usr/bin/node /opt/cncjs-bridge-ha/bridge.js
 Restart=always
 RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true
+
 [Install]
 WantedBy=multi-user.target

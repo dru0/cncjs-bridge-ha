@@ -1,27 +1,68 @@
-# CNCjs + Home Assistant + 3 × WS2812 na GPIO10 (SPI)
+# CNCjs → Home Assistant + WS2812 (Longer Ray5)
 
-## Ważne ograniczenia
-To rozwiązanie jest **wersją do przetestowania** z CNCjs (Socket.IO 2.x). Zdarzenia i pola `sender:status` mogą się różnić między wersjami CNCjs. Nie używaj automatyki jako jedynego zabezpieczenia przeciwpożarowego. **Czujnik finished oznacza zakończenie raportowane przez CNCjs, a nie niezależne potwierdzenie fizycznego wyłączenia lasera.** Zatrzymanie ręczne może wymagać dodatkowego dopasowania po analizie logów. Zdarzenia utraty USB i błędów są rozróżniane. Mostek nie wysyła G-code do lasera.
+Ten projekt uruchamia **tylko mostek** `bridge.js` i 3 diody WS2812 na SPI0 (GPIO10).
+Nie instaluje ani nie aktualizuje samego CNCjs i nie modyfikuje osobnej integracji Home Assistant.
 
-## Instalacja na Raspberry Pi OS Trixie (64-bit)
+> **Bezpieczeństwo:** mostek jest narzędziem monitorującym. Stan w HA nie potwierdza fizycznego wyłączenia lasera i nie zastępuje nadzoru, wentylacji ani wyłącznika awaryjnego. Instalację/aktualizację wykonuj wyłącznie wtedy, gdy laser nie pracuje.
 
-1. Skopiuj cały folder do `/home/pi/cncjs-ha-ws2812`.
-2. Aktywuj SPI: `sudo raspi-config` → Interface Options → SPI → Enable, a następnie `sudo reboot`.
-3. Sprawdź `ls /dev/spidev0.0`.
-4. Zainstaluj `sudo apt update && sudo apt install -y python3-spidev`.
-5. Nadaj dostęp do SPI: `sudo usermod -aG spi pi` (jeśli grupa `spi` istnieje; sprawdź `getent group spi`). Wyloguj i zaloguj się ponownie. Jeśli brak grupy, dodaj regułę udev albo skonfiguruj odpowiednie uprawnienia; nie uruchamiaj całego mostka jako root bez potrzeby.
-6. Test LED: `python3 /home/pi/cncjs-ha-ws2812/led_spi.py running`, a następnie `python3 /home/pi/cncjs-ha-ws2812/led_spi.py off`.
-7. W folderze mostka wykonaj `npm install --omit=dev`.
-8. Skopiuj `bridge.env.example` do `bridge.env`. Ustaw `HA_URL`, `HA_TOKEN` (długoterminowy token z profilu HA) i opcjonalnie `CNC_TOKEN` (token CNCjs, jeżeli włączone uwierzytelnianie). Zabezpiecz `chmod 600 bridge.env`.
-9. Test ręczny: `set -a; . ./bridge.env; set +a; node bridge.js`. W CNCjs rozpocznij krótki test **bez włączonego lasera**, sprawdź komunikaty i `sensor.cncjs_status` w HA.
-10. Skopiuj usługę: `sudo cp cncjs-ha-bridge.service /etc/systemd/system/`, `sudo systemctl daemon-reload`, `sudo systemctl enable --now cncjs-ha-bridge`.
-11. Logi: `journalctl -u cncjs-ha-bridge -f`.
-12. W Home Assistant wklej `home_assistant.yaml` jako **nową automatyzację**, a poprzednią automatyzację OctoPrint wyłącz, aby nie dublować sterowania.
+## Instalacja i automatyczna migracja starego bridge
 
-## LED
-GPIO10 = fizyczny pin 19 (SPI MOSI). Zasilaj WS2812 stabilnym 5 V, połącz masy, najlepiej użyj konwertera poziomów 3,3 V → 5 V. Nie zasilaj trzech diod bezpośrednio z GPIO10. Żadne inne urządzenie nie powinno korzystać z SPI0 podczas sterowania LED. Biblioteka `spidev` generuje 800 kHz przez SPI 2,4 MHz (3 bity SPI na 1 bit WS2812).
+Na Raspberry Pi (Debian 13 / Raspberry Pi OS) z Node.js i systemd:
 
-Kolory: idle biały, running zielony, paused żółty, finished niebieski, error czerwony. Po zakończeniu zadania LED gasną po 10 minutach; przy błędzie świecą czerwono. Jeżeli mostek lub RPi utraci zasilanie, LED i czujnik nie są niezależnym zabezpieczeniem.
+```bash
+cd ~/cncjs-bridge-ha
+git pull --ff-only
+sudo bash install.sh
+```
 
-## Diagnostyka
-Jeśli HA nie aktualizuje stanu, sprawdź `HA_URL`, `HA_TOKEN`, log `journalctl -u cncjs-ha-bridge -f` i ewentualny `CNC_TOKEN`. Jeśli `running` jest widoczne, a `finished` nie, prześlij logi `workflow` i informacje o wersji CNCjs; należy dopasować warunek zakończenia do Twojej wersji. Nie uruchamiaj OctoPrint i CNCjs jednocześnie na tym samym porcie USB.
+Jeżeli nie masz jeszcze kopii repozytorium:
+
+```bash
+git clone https://github.com/dru0/cncjs-bridge-ha.git ~/cncjs-bridge-ha
+cd ~/cncjs-bridge-ha
+sudo bash install.sh
+```
+
+Instalator:
+
+- pobiera kod do `/opt/cncjs-bridge-ha` (tam jest osobne repozytorium Git);
+- tworzy **systemowego** użytkownika `cncjsbridge` bez możliwości logowania, dodaje go do `spi` i `dialout`;
+- instaluje brakujące pakiety i zależności npm bridge;
+- przy pierwszej instalacji szuka istniejącego `bridge.env` w usłudze systemd oraz w `/home/pi/cncjs-ha-ws2812/` lub `/home/pi/cncjs-bridge-ha/` i kopiuje go bez ujawniania tokenów;
+- nadaje `bridge.env` uprawnienia `root:cncjsbridge`, tryb `0640`; kod w `/opt` jest zarządzany przez roota;
+- robi kopię starej jednostki systemd, podmienia **tylko** `cncjs-ha-bridge.service`, włącza ją i restartuje;
+- **nie usuwa** starego katalogu, nie zmienia `cncjs.service` ani plików/automatyzacji Home Assistant.
+
+Jeżeli nie znaleziono tokenu, instalator zapisze szablon i **nie zrestartuje** działającej usługi. Uzupełnij `sudo nano /opt/cncjs-bridge-ha/bridge.env`, a potem ponownie `sudo bash /opt/cncjs-bridge-ha/install.sh`.
+
+## Aktualizacja wyłącznie bridge
+
+```bash
+sudo bash /opt/cncjs-bridge-ha/update.sh
+```
+
+Skrypt wykonuje `git fetch` + `git merge --ff-only` **tylko** w `/opt/cncjs-bridge-ha`, sprawdza zależności i restartuje **tylko** `cncjs-ha-bridge.service`. Plik `bridge.env` jest ignorowany przez Git i zachowywany. Jeżeli usługa już działa, skrypt poprosi o potwierdzenie, że laser jest bezczynny. Nie używaj `sudo git pull` w starym katalogu domowym do aktualizowania uruchomionego bridge.
+
+## Sprawdzenie działania
+
+```bash
+systemctl status cncjs-ha-bridge.service --no-pager
+journalctl -u cncjs-ha-bridge.service -n 60 --no-pager
+id cncjsbridge
+ls -l /dev/spidev0.0 /dev/ttyUSB0
+```
+
+Konfiguracja jest w `/opt/cncjs-bridge-ha/bridge.env`. Używane zmienne: `CNC_URL`, `CNC_PORT`, `HA_URL` i `HA_TOKEN`. Token CNCjs jest pobierany automatycznie przez `bridge.js` z `/api/signin` (w tym wydaniu zmienna `CNC_TOKEN` nie jest odczytywana). Przykładowy port: `/dev/ttyUSB0`; urządzenie może mieć inną nazwę.
+
+Aby uruchomić LED, włącz SPI przez `sudo raspi-config` → Interface Options → SPI. Jeżeli po aktywacji nie ma `/dev/spidev0.0`, uruchom Raspberry Pi ponownie. Test jako użytkownik usługi:
+
+```bash
+sudo -u cncjsbridge python3 /opt/cncjs-bridge-ha/led_spi.py running
+sudo -u cncjsbridge python3 /opt/cncjs-bridge-ha/led_spi.py off
+```
+
+GPIO10 to pin 19 (SPI MOSI). Pasek WS2812 zasilaj z odpowiedniego 5 V, łącz wspólne masy i najlepiej użyj konwertera poziomów 3,3→5 V. GPIO10 nie służy do zasilania diod.
+
+## Przywrócenie poprzedniego uruchomienia
+
+Instalator zostawia poprzednie pliki w katalogu domowym i zapisuje kopię starej jednostki w `/etc/systemd/system/cncjs-ha-bridge.service.backup-...`. W razie problemu można ręcznie przywrócić poprzednią jednostkę, wykonać `sudo systemctl daemon-reload` i `sudo systemctl restart cncjs-ha-bridge.service`. Nie uruchamiaj dwóch mostków naraz. Ustawienia automatyzacji wentylatorów w HA pozostają poza zakresem instalatora.
