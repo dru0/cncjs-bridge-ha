@@ -260,6 +260,12 @@ const socket = io(CNC_URL, {
   timeout: 10000
 });
 
+require('./bridge_api')({
+  socket, port: PORT,
+  snapshot: () => ({state, socket_connected: socketConnected, serial_connected: portConnected,
+    attached, alarm, grbl_state: grblState, job_active: jobActive, workflow})
+});
+
 function retryAuth(delay = 10000) {
   if (authRetry) return;
 
